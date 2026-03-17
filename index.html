@@ -143,7 +143,9 @@
       });
 
       // Otomatis deteksi IP tempat dia dibuka
-      const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      // JANGAN tambahkan :8080 di sini karena Cloudflare Tunnel sudah mengarah ke port tersebut
+      const socket = new WebSocket(`${protocol}//${window.location.host}`);
 
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
