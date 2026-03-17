@@ -1,0 +1,210 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Ultimate Server Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --accent: #238636;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 20px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+        gap: 20px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      }
+      .status-bar {
+        padding: 10px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+        font-weight: bold;
+        background: #21262d;
+        border: 1px solid var(--border);
+      }
+      h2 {
+        margin-top: 0;
+        font-size: 1.1rem;
+        color: #8b949e;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+      }
+      .value-big {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #58a6ff;
+      }
+      canvas {
+        max-height: 250px;
+        width: 100% !important;
+      }
+      .storage-item {
+        margin-bottom: 10px;
+      }
+      .progress-bg {
+        background: #30363d;
+        border-radius: 5px;
+        height: 10px;
+        width: 100%;
+        overflow: hidden;
+      }
+      .progress-fill {
+        background: var(--accent);
+        height: 100%;
+        transition: width 0.5s;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="status-bar" id="status">Connecting to WebSocket...</div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>💻 CPU USAGE (%)</h2>
+        <div class="value-big" id="cpu-text">0%</div>
+        <canvas id="cpuChart"></canvas>
+      </div>
+
+      <div class="card">
+        <h2>🧠 MEMORY (RAM)</h2>
+        <div class="value-big" id="ram-text">0 GB</div>
+        <canvas id="ramChart"></canvas>
+      </div>
+
+      <div class="card">
+        <h2>🌐 NETWORK SPEED (KB/s)</h2>
+        <div id="net-info" style="margin-bottom: 10px">RX: 0 | TX: 0</div>
+        <canvas id="netChart"></canvas>
+      </div>
+
+      <div class="card">
+        <h2>💾 DISK USAGE</h2>
+        <div id="storage-list"></div>
+      </div>
+    </div>
+
+    <script>
+      // Konfigurasi Dasar Chart
+      const chartOptions = {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, grid: { color: "#30363d" } },
+          x: { display: false },
+        },
+        plugins: { legend: { display: false } },
+        animation: { duration: 0 }, // Matikan animasi biar gak berat
+      };
+
+      function createChart(id, label, color) {
+        return new Chart(document.getElementById(id), {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: label,
+                data: [],
+                borderColor: color,
+                tension: 0.3,
+                fill: true,
+                backgroundColor: color + "22",
+              },
+            ],
+          },
+          options: chartOptions,
+        });
+      }
+
+      const cpuChart = createChart("cpuChart", "CPU", "#58a6ff");
+      const ramChart = createChart("ramChart", "RAM", "#bc8cff");
+      const netChart = createChart("netChart", "RX", "#3fb950");
+
+      // Tambah dataset kedua untuk Network (TX)
+      netChart.data.datasets.push({
+        label: "TX",
+        data: [],
+        borderColor: "#f85149",
+        tension: 0.3,
+      });
+
+      const socket = new WebSocket("ws://localhost:8080");
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        const time = data.time;
+
+        // Update Text
+        document.getElementById("cpu-text").innerText =
+          `${data.cpu.usage}% (${data.thermal.main}°C)`;
+        document.getElementById("ram-text").innerText =
+          `${data.memory.used} / ${data.memory.total}`;
+        document.getElementById("net-info").innerText =
+          `IN: ${data.network.rx} | OUT: ${data.network.tx}`;
+
+        // Update CPU Chart
+        updateChart(cpuChart, time, data.cpu.usage);
+        // Update RAM Chart
+        updateChart(ramChart, time, parseFloat(data.memory.percent));
+        // Update Network Chart
+        updateChart(
+          netChart,
+          time,
+          parseFloat(data.network.rx),
+          parseFloat(data.network.tx),
+        );
+
+        // Update Storage (Render manual)
+        const storageHTML = data.storage
+          .map(
+            (s) => `
+                <div class="storage-item">
+                    <small>${s.mount}</small>
+                    <div class="progress-bg"><div class="progress-fill" style="width: ${s.use}"></div></div>
+                    <small>${s.use} Used</small>
+                </div>
+            `,
+          )
+          .join("");
+        document.getElementById("storage-list").innerHTML = storageHTML;
+      };
+
+      function updateChart(chart, label, val1, val2 = null) {
+        chart.data.labels.push(label);
+        chart.data.datasets[0].data.push(val1);
+        if (val2 !== null) chart.data.datasets[1].data.push(val2);
+
+        if (chart.data.labels.length > 20) {
+          chart.data.labels.shift();
+          chart.data.datasets[0].data.shift();
+          if (val2 !== null) chart.data.datasets[1].data.shift();
+        }
+        chart.update();
+      }
+
+      socket.onopen = () => {
+        document.getElementById("status").innerHTML =
+          "● LIVE SERVER MONITORING CONNECTED";
+        document.getElementById("status").style.color = "#3fb950";
+      };
+      socket.onclose = () => {
+        document.getElementById("status").innerHTML = "● DISCONNECTED";
+        document.getElementById("status").style.color = "#f85149";
+      };
+    </script>
+  </body>
+</html>
