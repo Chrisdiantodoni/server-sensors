@@ -142,7 +142,8 @@
         tension: 0.3,
       });
 
-      const socket = new WebSocket("ws://localhost:8080");
+      // Otomatis deteksi IP tempat dia dibuka
+      const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
 
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
