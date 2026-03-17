@@ -4,30 +4,31 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const wss = new WebSocket.Server({ port: 8080 });
-
-console.log("🚀 Server Monitoring jalan di port 8080");
-
+// 1. BUAT HTTP SERVER UNTUK SERVE INDEX.HTML
 const server = http.createServer((req, res) => {
-  // Sajikan file index.html
+  // Sajikan file index.html jika ada request masuk
   const filePath = path.join(__dirname, "index.html");
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(500);
-      return res.end("Error loading index.html");
+      return res.end("Error: index.html tidak ditemukan di server!");
     }
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(data);
   });
 });
 
+// 2. TEMPELKAN WEBSOCKET KE SERVER TERSEBUT
+const wss = new WebSocket.Server({ server });
+
+console.log("🚀 Server Monitoring Host Proxmox jalan di port 8080");
+
 wss.on("connection", (ws) => {
-  console.log("✅ Client terhubung");
+  console.log("✅ Client terhubung via WebSocket");
 
   const sendData = async () => {
     try {
-      // Kita ambil data temp, cpu, mem, load, dan fan secara paralel
-      const [temp, cpu, mem, load, fs, network] = await Promise.all([
+      const [temp, cpu, mem, load, fsSize, network] = await Promise.all([
         si.cpuTemperature(),
         si.cpu(),
         si.mem(),
@@ -38,34 +39,22 @@ wss.on("connection", (ws) => {
 
       const payload = {
         time: new Date().toLocaleTimeString(),
-        // DATA SENSOR (lm-sensors)
-        thermal: {
-          main: temp.main, // Suhu CPU rata-rata
-          cores: temp.cores, // Suhu per-core
-          max: temp.max,
-        },
-        // LOAD CPU
+        thermal: { main: temp.main, cores: temp.cores, max: temp.max },
         cpu: {
           brand: cpu.brand,
           usage: load.currentLoad.toFixed(2),
           cores: cpu.cores,
         },
-        // RAM
         memory: {
           total: (mem.total / 1024 ** 3).toFixed(2) + " GB",
           used: (mem.used / 1024 ** 3).toFixed(2) + " GB",
           percent: ((mem.used / mem.total) * 100).toFixed(2),
         },
-        // STORAGE (Disk Usage)
-        storage: fs.map((d) => ({
-          mount: d.mount,
-          use: d.use + "%",
-        })),
-        // NETWORK (Cek bandwidth masuk/keluar)
+        storage: fsSize.map((d) => ({ mount: d.mount, use: d.use + "%" })),
         network: {
-          interface: network[0].iface,
-          rx: (network[0].rx_sec / 1024).toFixed(2) + " KB/s",
-          tx: (network[0].tx_sec / 1024).toFixed(2) + " KB/s",
+          interface: network[0]?.iface || "eth0",
+          rx: (network[0]?.rx_sec / 1024).toFixed(2) + " KB/s",
+          tx: (network[0]?.tx_sec / 1024).toFixed(2) + " KB/s",
         },
       };
 
@@ -77,10 +66,9 @@ wss.on("connection", (ws) => {
     }
   };
 
-  const interval = setInterval(sendData, 2000); // Kirim tiap 2 detik
-
-  ws.on("close", () => {
-    console.log("❌ Client cabut");
-    clearInterval(interval);
-  });
+  const interval = setInterval(sendData, 2000);
+  ws.on("close", () => clearInterval(interval));
 });
+
+// 3. JALANKAN DI PORT 8080
+server.listen(8080, "0.0.0.0");
